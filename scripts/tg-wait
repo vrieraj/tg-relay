@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Wait for new message in inbox using inotify (blocks until file arrives)
+SESSION="${1:-}"
+if [ -z "$SESSION" ]; then
+    if [ -f /tmp/tg-current-session ]; then
+        SESSION=$(cat /tmp/tg-current-session)
+    else
+        echo "No session specified" >&2
+        exit 1
+    fi
+fi
+BASE="${TG_RELAY_SESSIONS:-$HOME/Proyectos/tg-relay/sessions}"
+INBOX="$BASE/$SESSION/inbox"
+mkdir -p "$INBOX"
+inotifywait -q -e create --format '%f' "$INBOX"

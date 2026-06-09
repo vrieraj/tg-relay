@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Session management for tg-relay."""
+import json, os, sys, shutil
+from datetime import datetime
+
+BASE = os.environ.get("TG_RELAY_SESSIONS") or os.path.expanduser("~/Proyectos/tg-relay/sessions")
+CURRENT_FILE = "/tmp/tg-current-session"
+
+def list_sessions():
+    for d in sorted(os.listdir(BASE)):
+        path = os.path.join(BASE, d)
+        if os.path.isdir(path):
+            inbox = len(os.listdir(os.path.join(path, "inbox"))) if os.path.exists(os.path.join(path, "inbox")) else 0
+            outbox = len(os.listdir(os.path.join(path, "outbox"))) if os.path.exists(os.path.join(path, "outbox")) else 0
+            files = os.listdir(os.path.join(path, "files")) if os.path.exists(os.path.join(path, "files")) else []
+            print(f"  {d}  ({inbox} pending, {outbox} responses, {len(files)} files)")
+
+def close_session(name):
+    path = os.path.join(BASE, name)
+    if not os.path.isdir(path):
+        print(f"Session '{name}' not found")
+        return
+    files_dir = os.path.join(path, "files")
+    has_files = os.path.exists(files_dir) and os.listdir(files_dir)
+    if has_files:
+        print(f"📎 Archivos en '{name}': {', '.join(os.listdir(files_dir))}")
+        print("¿Qué hacemos con los archivos? (guardar/borrar)")
+        choice = input("> ").strip().lower()
+        if choice.startswith("g"):
+            dest = os.path.expanduser(f"~/Descargas/tg-{name}-{datetime.now().strftime('%Y%m%d')}")
+            os.makedirs(dest, exist_ok=True)
+            for f in os.listdir(files_dir):
+                shutil.move(os.path.join(files_dir, f), os.path.join(dest, f))
+            print(f"📁 Archivos guardados en {dest}")
+        else:
+            shutil.rmtree(files_dir)
+            print("🗑️ Archivos borrados")
+    # Clean up current session file
+    if os.path.exists(CURRENT_FILE):
+        with open(CURRENT_FILE) as f:
+            cur = f.read().strip()
+        if cur == name:
+            os.remove(CURRENT_FILE)
+    shutil.rmtree(path)
+    print(f"✅ Sesión '{name}' cerrada")
+    # Offer to stop tg-serve if no sessions left
+    remaining = [d for d in os.listdir(BASE) if os.path.isdir(os.path.join(BASE, d))] if os.path.isdir(BASE) else []
+    if not remaining:
+        print("No quedan sesiones activas. ¿Parar tg-serve? (s/n)")
+        if input("> ").strip().lower().startswith("s"):
+            os.system("tg-serve stop")
+
+def create_session(name):
+    path = os.path.join(BASE, name)
+    if os.path.exists(path):
+        print(f"Session '{name}' already exists")
+        return path
+    os.makedirs(os.path.join(path, "inbox"))
+    os.makedirs(os.path.join(path, "outbox"))
+    os.makedirs(os.path.join(path, "files"))
+    return path
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: tg-session {list|create|close} [name]")
+        sys.exit(1)
+    cmd = sys.argv[1]
+    if cmd == "list":
+        list_sessions()
+    elif cmd == "create":
+        name = sys.argv[2] if len(sys.argv) > 2 else f"session-{datetime.now().strftime('%H%M%S')}"
+        create_session(name)
+        print(f"✅ Sesión '{name}' creada")
+    elif cmd == "close":
+        if len(sys.argv) < 3:
+            print("Need session name")
+            sys.exit(1)
+        close_session(sys.argv[2])

@@ -1,0 +1,8 @@
+#!/bin/bash
+ENV_FILE="${TG_RELAY_ENV_FILE:-$HOME/.config/opencode/.env}"
+[ -f "$ENV_FILE" ] && source <(grep -E '^(TG_TOKEN|TG_CHAT_ID)=' "$ENV_FILE")
+TOKEN="${TG_TOKEN:-}"
+CHAT_ID="${TG_CHAT_ID:-}"
+MSG="${*:-Done}"
+curl -s --data-urlencode "text=$MSG" \
+  "https://api.telegram.org/bot$TOKEN/sendMessage?chat_id=$CHAT_ID" &>/dev/null
