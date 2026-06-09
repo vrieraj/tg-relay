@@ -4,5 +4,12 @@ ENV_FILE="${TG_RELAY_ENV_FILE:-$HOME/.config/opencode/.env}"
 TOKEN="${TG_TOKEN:-}"
 CHAT_ID="${TG_CHAT_ID:-}"
 MSG="${*:-Done}"
-curl -s --data-urlencode "text=$MSG" \
-  "https://api.telegram.org/bot$TOKEN/sendMessage?chat_id=$CHAT_ID" &>/dev/null
+if [ -z "$TOKEN" ] || [ -z "$CHAT_ID" ]; then
+    echo "Error: TG_TOKEN and TG_CHAT_ID must be set" >&2
+    exit 1
+fi
+if ! curl -s --data-urlencode "text=$MSG" \
+  "https://api.telegram.org/bot$TOKEN/sendMessage?chat_id=$CHAT_ID" >/dev/null; then
+    echo "Error sending message to Telegram" >&2
+    exit 1
+fi

@@ -3,7 +3,6 @@ PATH="$HOME/.npm-global/bin:$PATH"
 SESSION="${1:-}"
 BASE="${TG_RELAY_SESSIONS:-$HOME/Proyectos/tg-relay/sessions}"
 ENV_FILE="${TG_RELAY_ENV_FILE:-$HOME/.config/opencode/.env}"
-[ -f "$ENV_FILE" ] && source <(grep -E '^(TG_TOKEN|TG_CHAT_ID)=' "$ENV_FILE")
 
 start() {
     if [ -z "$SESSION" ]; then
@@ -15,22 +14,18 @@ start() {
     SESSION_DIR="$BASE/$SESSION"
     mkdir -p "$SESSION_DIR"/{inbox,outbox,files}
 
-    # Default paths
     VENV_PYTHON="${TG_RELAY_VENV_PYTHON:-$HOME/Proyectos/tg-relay/.venv/bin/python3}"
     TG_BOT_PATH="${TG_BOT_PATH:-$HOME/.local/bin/tg-bot}"
     TG_MONITOR_PATH="${TG_MONITOR_PATH:-$HOME/.local/bin/tg-monitor}"
 
-    # Start opencode serve
     nohup opencode serve --port 4096 > /tmp/opencode-serve.log 2>&1 &
     echo $! > /tmp/tg-serve.pid
     sleep 2
 
-    # Start tg-bot pointing to this session
     TG_CURRENT_SESSION="$SESSION" nohup "$VENV_PYTHON" -u "$TG_BOT_PATH" > /tmp/tg-bot.log 2>&1 &
     echo $! > /tmp/tg-bot.pid
     sleep 1
 
-    # Start inbox monitor
     nohup "$VENV_PYTHON" -u "$TG_MONITOR_PATH" "$SESSION" > /tmp/tg-monitor.log 2>&1 &
     echo $! > /tmp/tg-monitor.pid
 
@@ -47,6 +42,7 @@ stop() {
             rm -f "$pidfile"
         fi
     done
+    rm -f /tmp/tg-last-update /tmp/tg-current-session /tmp/tg-new-msg
     echo "Parado"
 }
 

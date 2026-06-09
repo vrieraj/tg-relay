@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Telegram relay daemon: multi-session, voice/text, Kokoro TTS (local)."""
-import json, os, sys, threading, time, uuid
+import json, os, re, signal, sys, threading, time, uuid
 import requests
 
 ENV_FILE = os.environ.get("TG_RELAY_ENV_FILE") or os.path.expanduser("~/.config/opencode/.env")
@@ -15,8 +15,6 @@ if os.path.exists(ENV_FILE):
 TOKEN = os.environ.get("TG_TOKEN") or ""
 CHAT_ID = os.environ.get("TG_CHAT_ID") or ""
 GROQ_KEY = os.environ.get("GROQ_API_KEY") or ""
-ELEVEN_KEY = os.environ.get("ELEVENLABS_API_KEY") or ""
-ELEVEN_VOICE = os.environ.get("ELEVENLABS_VOICE_ID") or "qUPtETgSYRhCRb2pfOla"
 BASE = os.environ.get("TG_RELAY_SESSIONS") or os.path.expanduser("~/Proyectos/tg-relay/sessions")
 STATE_FILE = "/tmp/tg-last-update"
 CURRENT_FILE = "/tmp/tg-current-session"
@@ -27,12 +25,27 @@ if os.path.exists(CURRENT_FILE):
 if not CURRENT:
     CURRENT = os.environ.get("TG_CURRENT_SESSION") or ""
 
+if not TOKEN or not CHAT_ID:
+    print("ERROR: TG_TOKEN and TG_CHAT_ID are required", file=sys.stderr)
+    sys.exit(1)
+
+MAX_FILE_SIZE = 50 * 1024 * 1024
+SESSION_NAME_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
+
 def send_text(text):
-    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": text})
+    resp = requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                         json={"chat_id": CHAT_ID, "text": text})
+    data = resp.json()
+    if not data.get("ok"):
+        print(f"[send_text] Telegram API error: {data.get('description', 'unknown')}", file=sys.stderr)
 
 def send_audio(file_path):
     with open(file_path, "rb") as f:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendAudio", data={"chat_id": CHAT_ID}, files={"audio": f})
+        resp = requests.post(f"https://api.telegram.org/bot{TOKEN}/sendAudio",
+                             data={"chat_id": CHAT_ID}, files={"audio": f})
+    data = resp.json()
+    if not data.get("ok"):
+        print(f"[send_audio] Telegram API error: {data.get('description', 'unknown')}", file=sys.stderr)
 
 def transcribe_groq(file_path):
     with open(file_path, "rb") as f:
@@ -42,7 +55,11 @@ def transcribe_groq(file_path):
             data={"model": "whisper-large-v3-turbo"},
             files={"file": f},
         )
-    return resp.json().get("text", "")
+    if not resp.ok:
+        print(f"[transcribe_groq] API error: {resp.status_code} {resp.text}", file=sys.stderr)
+        return ""
+    data = resp.json()
+    return data.get("text", "")
 
 def tts_kokoro(text):
     from kokoro import KPipeline
@@ -60,24 +77,42 @@ def tts_kokoro(text):
     return path
 
 def get_updates(offset):
-    resp = requests.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates", params={"offset": offset + 1, "timeout": 10}, timeout=15)
-    return resp.json().get("result", []) if resp.json().get("ok") else []
+    resp = requests.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates",
+                        params={"offset": offset + 1, "timeout": 10}, timeout=15)
+    data = resp.json()
+    if not data.get("ok"):
+        print(f"[get_updates] Telegram API error: {data.get('description', 'unknown')}", file=sys.stderr)
+        return []
+    return data.get("result", [])
 
 def download_file(file_id):
-    info = requests.get(f"https://api.telegram.org/bot{TOKEN}/getFile", params={"file_id": file_id}).json()
+    resp = requests.get(f"https://api.telegram.org/bot{TOKEN}/getFile",
+                        params={"file_id": file_id})
+    resp.raise_for_status()
+    info = resp.json()
     path = info["result"]["file_path"]
     url = f"https://api.telegram.org/file/bot{TOKEN}/{path}"
-    dest = f"/tmp/tg-audio-{uuid.uuid4()}.{path.rsplit('.', 1)[-1]}"
+    ext = path.rsplit('.', 1)[-1] if '.' in path else 'bin'
+    dest = f"/tmp/tg-file-{uuid.uuid4()}.{ext}"
+    dl = requests.get(url, stream=True)
+    dl.raise_for_status()
+    size = 0
     with open(dest, "wb") as f:
-        f.write(requests.get(url).content)
+        for chunk in dl.iter_content(chunk_size=8192):
+            size += len(chunk)
+            if size > MAX_FILE_SIZE:
+                os.remove(dest)
+                raise ValueError(f"File too large (limit: {MAX_FILE_SIZE // (1024*1024)} MB)")
+            f.write(chunk)
     return dest
 
 def list_sessions():
+    if not os.path.isdir(BASE):
+        return []
     sessions = []
-    if os.path.isdir(BASE):
-        for d in sorted(os.listdir(BASE)):
-            if os.path.isdir(os.path.join(BASE, d)):
-                sessions.append(d)
+    for d in sorted(os.listdir(BASE)):
+        if os.path.isdir(os.path.join(BASE, d)):
+            sessions.append(d)
     return sessions
 
 def session_dir(name):
@@ -94,10 +129,16 @@ def save_offset(uid):
         f.write(str(uid))
     return uid
 
+def cleanup(signum, frame):
+    print(f"[tg-bot] Shutting down (signal {signum})...", file=sys.stderr)
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, cleanup)
+signal.signal(signal.SIGINT, cleanup)
+
 send_text(f"🔁 Relay activado | Sesión: {CURRENT or '(ninguna)'}")
 send_text("Sesiones: " + ", ".join(list_sessions()) if list_sessions() else "Sin sesiones activas")
 
-# Background responder: watch outbox/ and send replies
 def responder():
     while True:
         try:
@@ -105,24 +146,33 @@ def responder():
                 out_dir = os.path.join(BASE, ses, "outbox")
                 if not os.path.isdir(out_dir):
                     continue
-                for fname in os.listdir(out_dir):
-                    fpath = os.path.join(out_dir, fname)
-                    if not fname.endswith(".txt"):
+                for fname in sorted(os.listdir(out_dir)):
+                    if not fname.endswith(".txt") or fname.endswith(".processing"):
                         continue
-                    with open(fpath) as f:
-                        reply = f.read().strip()
-                    os.remove(fpath)
-                    if reply:
-                        if reply.startswith("!tts "):
-                            audio_path = tts_kokoro(reply[5:])
-                            if audio_path:
-                                send_audio(audio_path)
-                                os.remove(audio_path)
-                        else:
-                            send_text(reply)
-        except Exception:
-            pass
+                    src = os.path.join(out_dir, fname)
+                    dst = src + ".processing"
+                    try:
+                        os.rename(src, dst)
+                    except FileNotFoundError:
+                        continue
+                    try:
+                        with open(dst) as f:
+                            reply = f.read().strip()
+                        if reply:
+                            if reply.startswith("!tts "):
+                                audio_path = tts_kokoro(reply[5:])
+                                if audio_path:
+                                    send_audio(audio_path)
+                                    os.remove(audio_path)
+                            else:
+                                send_text(reply)
+                    finally:
+                        if os.path.exists(dst):
+                            os.remove(dst)
+        except Exception as e:
+            print(f"[responder] Error: {e}", file=sys.stderr)
         time.sleep(3)
+
 threading.Thread(target=responder, daemon=True).start()
 
 while True:
@@ -150,10 +200,13 @@ while True:
                 last_id = save_offset(uid)
                 continue
 
-            # Session switching
             if text.lower().startswith("usar ") or text.lower().startswith("cambiar a "):
                 parts = text.split(" ", 1)
                 target = parts[1].strip() if len(parts) > 1 else ""
+                if not SESSION_NAME_RE.match(target):
+                    send_text(f"❌ Nombre de sesión inválido: {target}")
+                    last_id = save_offset(uid)
+                    continue
                 if os.path.isdir(os.path.join(BASE, target)):
                     CURRENT = target
                     with open(CURRENT_FILE, "w") as f:
@@ -164,31 +217,26 @@ while True:
                 last_id = save_offset(uid)
                 continue
 
-            # Hang up
             if any(x in text.lower() for x in ["cuelgo el teléfono", "cuelga", "colgar", "finalizar"]):
                 if CURRENT:
                     sid = CURRENT
                     CURRENT = ""
                     if os.path.exists(CURRENT_FILE):
                         os.remove(CURRENT_FILE)
-                    in_dir = os.path.join(BASE, sid, "inbox")
-                    os.makedirs(in_dir, exist_ok=True)
-                    with open(os.path.join(in_dir, "!colgar.txt"), "w") as f:
-                        f.write("cuelgo el teléfono")
+                    with open(os.path.join(BASE, sid, "!colgar.signal"), "w") as f:
+                        f.write("")
                     send_text(f"🛑 Colgando sesión '{sid}'...")
                 else:
                     send_text("❌ No hay sesión activa")
                 last_id = save_offset(uid)
                 continue
 
-            # Write to current session inbox
             if not CURRENT:
                 send_text("❌ No hay sesión activa. Usa: usar <nombre>")
                 send_text("Sesiones: " + ", ".join(list_sessions()))
                 last_id = save_offset(uid)
                 continue
 
-            # Handle file attachments (document or photo)
             file_note = ""
             doc = msg.get("document") or {}
             photo = msg.get("photo") or []
@@ -216,7 +264,9 @@ while True:
             with open(in_file, "w") as f:
                 f.write(text)
 
-            # Check estado — auto-reply if busy
+            with open(os.path.join(BASE, CURRENT, ".new"), "w") as f:
+                f.write(mid)
+
             estado_file = os.path.join(BASE, CURRENT, "!estado.txt")
             estado = "idle"
             if os.path.exists(estado_file):
@@ -224,13 +274,9 @@ while True:
                     estado = f.read().strip()
             if estado and estado != "idle":
                 send_text(f"⏳ Estoy ocupado: {estado}\n📩 Tu mensaje queda en cola, lo proceso cuando termine.")
-            else:
-                # Signal that a new message arrived
-                with open(os.path.join(BASE, CURRENT, ".new"), "w") as f:
-                    f.write(mid)
 
             last_id = save_offset(uid)
 
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        print(f"[tg-bot] Error: {e}", file=sys.stderr)
         time.sleep(5)

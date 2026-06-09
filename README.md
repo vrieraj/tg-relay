@@ -126,6 +126,17 @@ tg-relay/
 └── README.md
 ```
 
+## Security
+
+This project underwent a security audit (2026-06). Key fixes applied:
+
+| Severity | Count | Key issues fixed |
+|----------|-------|------------------|
+| 🔴 CRITICAL | 3 | Path traversal in session names, `os.system()` replaced, unused API key removed |
+| 🟠 HIGH | 5 | Silent error handling, race condition in outbox reads, missing input validation, file size limits |
+| 🟡 MEDIUM | 6 | API response verification, signal handlers, graceful shutdown, stale state cleanup |
+| 🟢 LOW | 5 | Error feedback in `tg` CLI, subprocess cleanup, dead code removal |
+
 ## License
 
 GNU General Public License v3.0 or later. See [LICENSE](LICENSE).
