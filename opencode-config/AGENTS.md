@@ -13,11 +13,16 @@ Telegram API ◄──────────► tg-bot (daemon)
                         ├── files/       ← archivos adjuntos
                         ├── .new         ← señal de mensaje nuevo (contiene msg id)
                         └── !estado.txt  ← estado de opencode (idle | ocupado: tarea)
-                               │
-                    tg-read / tg-wait
-                               │
-                               ▼
-                        opencode (TUI)
+                        │
+              ┌─────────┴─────────┐
+              ▼                   ▼
+         tg-wait             tg-watch
+        (one-shot)       (persistente,
+                         inotify daemon)
+              │                   │
+              └────────┬──────────┘
+                       ▼
+                 opencode (TUI)
 ```
 
 ## Responsabilidades
@@ -91,10 +96,12 @@ tg "✅ Modo remoto activado. Sesión: <nombre>"
 
 ## Inotify watcher
 
-- `tg-watch` es un daemon persistente que usa inotify para detectar mensajes nuevos
+- `tg-watch` es un daemon persistente que monitoriza `.new` via inotify
 - Arrancar en background: `tg-watch [sesion] &`
 - Requiere `inotify-tools` instalado en el sistema
-- Registra cada nuevo mensaje en stdout/log
+- Cuando tg-bot crea `.new`, el watcher escribe `/tmp/tg-new-msg` con el nombre de la sesión
+- **opencode debe comprobar `/tmp/tg-new-msg` al empezar cada respuesta**:
+  - Si existe → ejecutar `tg-read [sesion]` → procesar → borrar `/tmp/tg-new-msg`
 
 ## Notas técnicas
 
