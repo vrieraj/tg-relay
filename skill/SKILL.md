@@ -1,7 +1,7 @@
 ---
 name: tg-relay
 description: Telegram <-> opencode relay daemon with voice transcription (Groq Whisper), TTS (Kokoro), file attachments, and multi-session management
-license: MIT
+license: GPL-3.0-or-later
 compatibility: opencode
 metadata:
   audience: opencode users
