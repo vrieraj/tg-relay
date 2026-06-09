@@ -47,7 +47,14 @@ else
     echo "==> $ENV_FILE already exists, skipping"
 fi
 
-# 5. Install espeak-ng for Kokoro (if not present)
+# 5. Check system dependencies
+if ! command -v inotifywait &>/dev/null; then
+    echo ""
+    echo "⚠️  inotify-tools not found. Install it:"
+    echo "   Arch:  sudo pacman -S inotify-tools"
+    echo "   Debian: sudo apt install inotify-tools"
+fi
+
 if ! command -v espeak-ng &>/dev/null; then
     echo ""
     echo "⚠️  espeak-ng not found. Install it:"
@@ -58,13 +65,16 @@ fi
 # 6. Copy opencode skill and config
 echo "==> Copying opencode skill..."
 mkdir -p "$CONFIG_DIR/skills/tg-relay"
-cp "$REPO_DIR/skill/SKILL.md" "$CONFIG_DIR/skills/tg-relay/SKILL.md" 2>/dev/null || true
+cp -f "$REPO_DIR/skill/SKILL.md" "$CONFIG_DIR/skills/tg-relay/SKILL.md" 2>/dev/null || true
+cp -f "$REPO_DIR/opencode-config/AGENTS.md" "$CONFIG_DIR/AGENTS.md" 2>/dev/null || true
 
 echo ""
 echo "✅ tg-relay installed!"
 echo ""
 echo "Next steps:"
-echo "  1. Edit $ENV_FILE with your tokens"
-echo "  2. Create a session: tg-session create my-session"
-echo "  3. Start the server: tg-serve start my-session"
-echo "  4. Test: tg \"Hello from opencode!\""
+echo "  1. Install inotify-tools: sudo pacman -S inotify-tools"
+echo "  2. Edit $ENV_FILE with your tokens"
+echo "  3. Create a session: tg-session create my-session"
+echo "  4. Start the server: tg-serve start my-session"
+echo "  5. Start watcher: tg-watch my-session &"
+echo "  6. Test: tg \"Hello from opencode!\""

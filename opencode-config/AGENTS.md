@@ -89,11 +89,19 @@ tg "✅ Modo remoto activado. Sesión: <nombre>"
   - Elimina la carpeta de sesión
   - Si no quedan sesiones: pregunta si parar tg-serve
 
+## Inotify watcher
+
+- `tg-watch` es un daemon persistente que usa inotify para detectar mensajes nuevos
+- Arrancar en background: `tg-watch [sesion] &`
+- Requiere `inotify-tools` instalado en el sistema
+- Registra cada nuevo mensaje en stdout/log
+
 ## Notas técnicas
 
 - **tg-bot** usa `/tmp/tg-last-update` para offset de Telegram API
 - **tg-bot** persiste la sesión activa en `/tmp/tg-current-session`
 - **tg-bot** corre con Python del venv: `tg-relay/.venv/bin/python3`
+- **tg-watch** depende de `inotify-tools` (sistema)
 - El `.new` contiene el msg id del último mensaje (se sobrescribe)
 - Los mensajes en `inbox/` usan formato `<uuid>.txt` con el texto plano
 - Las respuestas en `outbox/` usan formato `<uuid>.txt` con el texto a enviar

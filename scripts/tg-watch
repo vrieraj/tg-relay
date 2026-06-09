@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Persistent inotify watcher — signals when new messages arrive in inbox
+# Usage: tg-watch [session]
+set -e
+
+SESSION="${1:-}"
+if [ -z "$SESSION" ]; then
+    if [ -f /tmp/tg-current-session ]; then
+        SESSION=$(cat /tmp/tg-current-session)
+    else
+        echo "Usage: tg-watch [session]" >&2
+        exit 1
+    fi
+fi
+
+BASE="${TG_RELAY_SESSIONS:-$HOME/Proyectos/tg-relay/sessions}"
+INBOX="$BASE/$SESSION/inbox"
+mkdir -p "$INBOX"
+
+inotifywait -m -e create -e moved_to --format '%f' "$INBOX" 2>/dev/null | while read file; do
+    if echo "$file" | grep -q '\.txt$'; then
+        echo "[Telegram] Nuevo mensaje en sesion '$SESSION': inbox/$file"
+    fi
+done

@@ -25,8 +25,13 @@ Telegram API ◄──────────► tg-bot (daemon)
                 ├── .new         ← señal de mensaje nuevo
                 └── !estado.txt  ← estado de opencode
                        │
-                  tg-read / tg-wait
-                       │
+              ┌────────┴────────┐
+              ▼                 ▼
+         tg-wait           tg-watch
+        (bloqueante)    (persistente,
+                         inotify daemon)
+              │                 │
+              └────────┬────────┘
                        ▼
                  opencode (TUI)
 ```
@@ -65,6 +70,7 @@ Todo es comunicación vía archivos — no hay sockets, no hay colas, no hay est
 - Linux (tested on Arch/Manjaro)
 - Python 3.11+
 - [opencode](https://opencode.ai) installed
+- `inotify-tools` (system package: `sudo pacman -S inotify-tools` on Arch, `sudo apt install inotify-tools` on Debian)
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
 - Your Telegram Chat ID
 
@@ -98,7 +104,10 @@ tg-serve start mysession
 # Notify
 tg "✅ Modo remoto activado. Sesión: mysession"
 
-# In opencode, wait for messages
+# Start persistent watcher (background)
+tg-watch mysession &
+
+# In opencode, wait for messages (one-shot)
 tg-wait mysession
 # ...process...
 tg-read mysession
@@ -117,7 +126,8 @@ tg-read mysession
 |---------|-------------|
 | `tg <text>` | Send notification to Telegram |
 | `tg-read [session]` | Read pending inbox messages |
-| `tg-wait [session]` | Block until new message arrives (inotify) |
+| `tg-wait [session]` | Block until new message arrives (inotify, one-shot) |
+| `tg-watch [session]` | Persistent inotify watcher — logs new messages to stdout |
 | `tg-session create <name>` | Create a new session |
 | `tg-session list` | List all sessions |
 | `tg-session close <name>` | Close a session |
