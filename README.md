@@ -33,6 +33,31 @@ Telegram API ◄──────────► tg-bot (daemon)
 
 Only `tg-bot` talks to Telegram API. opencode reads/writes via simple file-based IPC.
 
+## How it works — end-to-end example
+
+```
+You (Telegram)          tg-bot (daemon)          opencode (TUI)
+     │                       │                       │
+     │  "refactor auth.py"   │                       │
+     │──────────────────────▶│                       │
+     │                       │  escribe inbox/       │
+     │                       │──────────────────────▶│  tg-wait detecta
+     │                       │                       │  tg-read procesa
+     │                       │                       │  ...trabaja...
+     │                       │                       │
+     │                       │  lee outbox/          │  escribe outbox/
+     │    "✅ Hecho, PR #42" │◄──────────────────────│
+     │◄──────────────────────│                       │
+```
+
+1. **Llega un mensaje** — `tg-bot` recibe el update de Telegram, escribe `inbox/<id>.txt` con el texto, y crea `.new` como señal.
+2. **opencode lo detecta** — `tg-wait` (inotify) o el polling de `tg-read` ve el archivo nuevo.
+3. **opencode procesa** — lee el mensaje con `tg-read` (que lo borra del inbox), ejecuta la tarea, y escribe la respuesta en `outbox/<id>.txt`.
+4. **tg-bot responde** — el hilo responder del bot escanea `outbox/` cada 3s, detecta el archivo, lo lee, lo envía a Telegram y lo elimina.
+5. **TTS opcional** — si la respuesta empieza con `!tts `, tg-bot genera audio con Kokoro y lo envía como nota de voz.
+
+Todo es comunicación vía archivos — no hay sockets, no hay colas, no hay estado compartido en memoria. Cada componente es independiente y puede reiniciarse sin pérdida.
+
 ## Quick Start
 
 ### Prerequisites
@@ -125,17 +150,6 @@ tg-relay/
 ├── install.sh            # Automated install
 └── README.md
 ```
-
-## Security
-
-This project underwent a security audit (2026-06). Key fixes applied:
-
-| Severity | Count | Key issues fixed |
-|----------|-------|------------------|
-| 🔴 CRITICAL | 3 | Path traversal in session names, `os.system()` replaced, unused API key removed |
-| 🟠 HIGH | 5 | Silent error handling, race condition in outbox reads, missing input validation, file size limits |
-| 🟡 MEDIUM | 6 | API response verification, signal handlers, graceful shutdown, stale state cleanup |
-| 🟢 LOW | 5 | Error feedback in `tg` CLI, subprocess cleanup, dead code removal |
 
 ## License
 
