@@ -56,7 +56,7 @@ You (Telegram)          tg-bot (daemon)          opencode (TUI)
 ```
 
 1. **Llega un mensaje** — `tg-bot` recibe el update de Telegram, escribe `inbox/<id>.txt` con el texto, y crea `.new` como señal.
-2. **opencode lo detecta** — `tg-wait` (inotify) o el polling de `tg-read` ve el archivo nuevo.
+2. **opencode lo detecta** — `tg-wait` (inotify) o `tg-read` ve el archivo nuevo.
 3. **opencode procesa** — lee el mensaje con `tg-read` (que lo borra del inbox), ejecuta la tarea, y escribe la respuesta en `outbox/<id>.txt`.
 4. **tg-bot responde** — el hilo responder del bot escanea `outbox/` cada 3s, detecta el archivo, lo lee, lo envía a Telegram y lo elimina.
 5. **TTS opcional** — si la respuesta empieza con `!tts `, tg-bot genera audio con Kokoro y lo envía como nota de voz.

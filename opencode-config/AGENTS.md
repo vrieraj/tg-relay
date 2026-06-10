@@ -7,22 +7,19 @@ Telegram API ◄──────────► tg-bot (daemon)
                                │
                     escribe/lee en
                                ▼
-                    ~/Proyectos/tg-relay/sessions/<nombre>/
-                        ├── inbox/       ← mensajes desde Telegram
-                        ├── outbox/      ← respuestas desde opencode
-                        ├── files/       ← archivos adjuntos
-                        ├── .new         ← señal de mensaje nuevo (contiene msg id)
-                        └── !estado.txt  ← estado de opencode (idle | ocupado: tarea)
-                        │
-              ┌─────────┴─────────┐
-              ▼                   ▼
-         tg-wait             tg-watch
-        (one-shot)       (persistente,
-                         inotify daemon)
-              │                   │
-              └────────┬──────────┘
-                       ▼
-                 opencode (TUI)
+    ~/Proyectos/tg-relay/sessions/<nombre>/
+        ├── inbox/       ← mensajes desde Telegram
+        ├── outbox/      ← respuestas desde opencode
+        ├── files/       ← archivos adjuntos
+        ├── .new         ← señal de mensaje nuevo (contiene msg id)
+        └── !estado.txt  ← estado de opencode (idle | ocupado: tarea)
+              ┌────┴────┐
+              │         │
+         tg-monitor   tg-read / tg-wait
+      (inotify daemon) (inotify one-shot)
+              │         │
+              ▼         ▼
+         /tmp/tg-new-msg  opencode (TUI)
 ```
 
 ## Responsabilidades
@@ -41,6 +38,11 @@ Telegram API ◄──────────► tg-bot (daemon)
 - Gestiona estado (`!estado.txt`)
 - Detecta vuelta a terminal y pregunta si cerrar sesión
 
+### tg-monitor (daemon opcional)
+- **Inotify persistente**: monitoriza `inbox/` con `inotifywait -m`
+- **Notificación**: escribe la sesión en `/tmp/tg-new-msg` cuando llega un mensaje
+- **Alternativa ligera**: permite a opencode vigilar un solo archivo en vez de llamar a `tg-wait`
+
 ## Flujo de mensaje entrante (Telegram → opencode)
 
 1. Usuario envía texto/voz/archivo a bot de Telegram
@@ -51,8 +53,10 @@ Telegram API ◄──────────► tg-bot (daemon)
 3. `tg-bot` lee `!estado.txt`:
    - **idle** (o no existe): escribe `.new` con el msg id → señal para opencode
    - **ocupado: X**: responde a Telegram "⏳ Estoy ocupado: X. Tu mensaje queda en cola."
-4. opencode (vía `tg-wait` o al terminar tarea) detecta `.new` o nuevos archivos en `inbox/`
+4. **Detección**: opencode bloquea con `tg-wait` (inotify) hasta que aparece un archivo en `inbox/`
+   - Alternativa: opencode vigila `/tmp/tg-new-msg` (escrito por tg-monitor)
 5. opencode ejecuta `tg-read` para leer y procesar mensajes pendientes
+6. **Bucle**: al terminar, opencode vuelve al paso 4
 
 ## Flujo de mensaje saliente (opencode → Telegram)
 
@@ -69,6 +73,7 @@ Telegram API ◄──────────► tg-bot (daemon)
 - **No se cambia estado desde Telegram** — opencode lo gestiona solo
 - `tg-bot` solo notifica `.new` si está idle
 - opencode al volver a idle debe revisar `inbox/` SIEMPRE
+- **Nunca uses sleep/polling** para esperar mensajes — usa `tg-wait` (inotify) o `/tmp/tg-new-msg`
 
 ## Ciclo de vida de sesión
 
@@ -96,19 +101,18 @@ tg "✅ Modo remoto activado. Sesión: <nombre>"
 
 ## Inotify watcher
 
-- `tg-watch` es un daemon persistente que monitoriza `.new` via inotify
-- Arrancar en background: `tg-watch [sesion] &`
+- `tg-monitor` es un daemon persistente que monitoriza `inbox/` via inotify
+- Arrancar en background: `tg-serve start <sesion>` lo lanza automáticamente
 - Requiere `inotify-tools` instalado en el sistema
-- Cuando tg-bot crea `.new`, el watcher escribe `/tmp/tg-new-msg` con el nombre de la sesión
-- **opencode debe comprobar `/tmp/tg-new-msg` al empezar cada respuesta**:
-  - Si existe → ejecutar `tg-read [sesion]` → procesar → borrar `/tmp/tg-new-msg`
+- Cuando tg-bot crea un archivo en `inbox/`, el monitor escribe `/tmp/tg-new-msg` con el nombre de la sesión
+- **Alternativa a tg-wait**: opencode puede vigilar `/tmp/tg-new-msg` con inotify en vez de llamar a tg-wait
 
 ## Notas técnicas
 
 - **tg-bot** usa `/tmp/tg-last-update` para offset de Telegram API
 - **tg-bot** persiste la sesión activa en `/tmp/tg-current-session`
 - **tg-bot** corre con Python del venv: `tg-relay/.venv/bin/python3`
-- **tg-watch** depende de `inotify-tools` (sistema)
+- **tg-monitor** y **tg-wait** dependen de `inotify-tools` (sistema)
 - El `.new` contiene el msg id del último mensaje (se sobrescribe)
 - Los mensajes en `inbox/` usan formato `<uuid>.txt` con el texto plano
 - Las respuestas en `outbox/` usan formato `<uuid>.txt` con el texto a enviar
