@@ -34,13 +34,13 @@ Telegram API <--> tg-bot (daemon) <--> inbox/outbox <--> opencode
 | `tg <texto>` | Send notification to Telegram |
 | `tg-read [sesion]` | Read pending inbox messages |
 | `tg-wait [sesion]` | Block until a new message arrives (one-shot, uses inotify) |
-| `tg-watch [sesion]` | Persistent daemon — logs new messages to stdout as they arrive |
+| `tg-monitor [sesion]` | Daemon persistente (inotify) — escribe `/tmp/tg-new-msg` al llegar un mensaje |
 | `tg-session {create\|list\|close}` | Manage sessions |
 | `tg-serve {start\|stop} <nombre>` | Start/stop session server |
 
 ## Dependencies
 
-- **inotify-tools** — required for `tg-wait` and `tg-watch`. Install:
+- **inotify-tools** — required for `tg-wait` and `tg-monitor`. Install:
   - Arch: `sudo pacman -S inotify-tools`
   - Debian: `sudo apt install inotify-tools`
 
@@ -49,6 +49,6 @@ Telegram API <--> tg-bot (daemon) <--> inbox/outbox <--> opencode
 1. **Install deps**: `sudo pacman -S inotify-tools` (Arch) / `sudo apt install inotify-tools` (Debian)
 2. **Start session**: `tg-session create mysession && tg-serve start mysession`
 3. **Notify**: `tg "✅ Modo remoto activado"`
-4. **Start watcher** (background): `tg-watch mysession &`
+4. **tg-serve** arranca `tg-monitor` automáticamente (daemon inotify persistente)
 5. **Process**: `tg-read mysession` -> process -> write to `outbox/`
 6. **Close**: "cuelgo el telefono" from Telegram, or `tg-session close mysession`

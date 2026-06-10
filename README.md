@@ -18,22 +18,22 @@ Telegram API ◄──────────► tg-bot (daemon)
                                │
                     escribe/lee en
                                ▼
-             sessions/<nombre>/
-                ├── inbox/       ← mensajes desde Telegram
-                ├── outbox/      ← respuestas desde opencode
-                ├── files/       ← archivos adjuntos
-                ├── .new         ← señal de mensaje nuevo
-                └── !estado.txt  ← estado de opencode
-                       │
-              ┌────────┴────────┐
-              ▼                 ▼
-         tg-wait           tg-watch
-        (bloqueante)    (persistente,
-                         inotify daemon)
-              │                 │
-              └────────┬────────┘
+              sessions/<nombre>/
+                 ├── inbox/       ← mensajes desde Telegram
+                 ├── outbox/      ← respuestas desde opencode
+                 ├── files/       ← archivos adjuntos
+                 ├── .new         ← señal de mensaje nuevo
+                 └── !estado.txt  ← estado de opencode
+                        │
+              ┌─────────┴─────────┐
+              ▼                   ▼
+         tg-wait             tg-monitor
+        (one-shot,         (daemon persistente,
+         inotify)           inotify -m)
+              │                   │
+              └────────┬──────────┘
                        ▼
-                 opencode (TUI)
+                  opencode (TUI)
 ```
 
 Only `tg-bot` talks to Telegram API. opencode reads/writes via simple file-based IPC.
@@ -104,9 +104,6 @@ tg-serve start mysession
 # Notify
 tg "✅ Modo remoto activado. Sesión: mysession"
 
-# Start persistent watcher (background)
-tg-watch mysession &
-
 # In opencode, wait for messages (one-shot)
 tg-wait mysession
 # ...process...
@@ -127,7 +124,7 @@ tg-read mysession
 | `tg <text>` | Send notification to Telegram |
 | `tg-read [session]` | Read pending inbox messages |
 | `tg-wait [session]` | Block until new message arrives (inotify, one-shot) |
-| `tg-watch [session]` | Persistent inotify watcher — logs new messages to stdout |
+| `tg-monitor [session]` | Daemon persistente (inotify) — escribe `/tmp/tg-new-msg` al llegar mensaje |
 | `tg-session create <name>` | Create a new session |
 | `tg-session list` | List all sessions |
 | `tg-session close <name>` | Close a session |
