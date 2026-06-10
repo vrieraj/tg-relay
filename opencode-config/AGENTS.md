@@ -86,6 +86,10 @@ tg "✅ Modo remoto activado. Sesión: <nombre>"
 
 ### Usar (cambiar de sesión desde Telegram)
 - Enviar: `usar <nombre>` o `cambiar a <nombre>`
+- `listar sesiones` — lista todas con detalles
+- `crear sesion <nombre>` — crea y activa una nueva
+- `cerrar sesion [nombre]` — cierra (archivos guardados automáticamente)
+- `tg-wait` / `tg-read` sin argumentos usan la sesión activa (`/tmp/tg-current-session`)
 
 ### Cerrar
 - **Desde Telegram**: "cuelgo el teléfono"
@@ -117,4 +121,5 @@ tg "✅ Modo remoto activado. Sesión: <nombre>"
 - Los mensajes en `inbox/` usan formato `<uuid>.txt` con el texto plano
 - Las respuestas en `outbox/` usan formato `<uuid>.txt` con el texto a enviar
 - Si se quiere respuesta con audio, el texto en outbox debe empezar con `!tts `
+- Los mensajes editados en Telegram se reescriben en `inbox/` con prefijo `✏️ *mensaje editado*:`
 - **TTS local** con Kokoro (82M params, CPU, español + 9 idiomas)
