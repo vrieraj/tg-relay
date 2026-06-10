@@ -6,6 +6,12 @@ BASE = os.environ.get("TG_RELAY_SESSIONS") or os.path.expanduser("~/Proyectos/tg
 CURRENT_FILE = "/tmp/tg-current-session"
 ALERT_FILE = "/tmp/tg-new-msg"
 
+if not subprocess.run(["which", "inotifywait"], capture_output=True).returncode == 0:
+    print("Error: inotifywait not found. Install inotify-tools:", file=sys.stderr)
+    print("  Arch:  sudo pacman -S inotify-tools", file=sys.stderr)
+    print("  Debian: sudo apt install inotify-tools", file=sys.stderr)
+    sys.exit(1)
+
 def get_session():
     if len(sys.argv) > 1:
         return sys.argv[1]

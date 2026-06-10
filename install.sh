@@ -46,6 +46,7 @@ if [ ! -f "$ENV_FILE" ]; then
 else
     echo "==> $ENV_FILE already exists, skipping"
 fi
+chmod 600 "$ENV_FILE" 2>/dev/null || true
 
 # 5. Check system dependencies
 if ! command -v inotifywait &>/dev/null; then

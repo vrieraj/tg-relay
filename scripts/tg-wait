@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 # Wait for new message in inbox using inotify (blocks until file arrives)
+set -e
+
+if ! command -v inotifywait &>/dev/null; then
+    echo "Error: inotifywait not found. Install inotify-tools:" >&2
+    echo "  Arch:  sudo pacman -S inotify-tools" >&2
+    echo "  Debian: sudo apt install inotify-tools" >&2
+    exit 1
+fi
+
 SESSION="${1:-}"
 if [ -z "$SESSION" ]; then
     if [ -f /tmp/tg-current-session ]; then
@@ -9,6 +18,13 @@ if [ -z "$SESSION" ]; then
         exit 1
     fi
 fi
+
+# Validate session name (alphanumeric, underscores, hyphens)
+if ! [[ "$SESSION" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "Invalid session name: $SESSION" >&2
+    exit 1
+fi
+
 BASE="${TG_RELAY_SESSIONS:-$HOME/Proyectos/tg-relay/sessions}"
 INBOX="$BASE/$SESSION/inbox"
 mkdir -p "$INBOX"

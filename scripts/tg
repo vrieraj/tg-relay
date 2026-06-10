@@ -1,15 +1,29 @@
-#!/bin/bash
-ENV_FILE="${TG_RELAY_ENV_FILE:-$HOME/.config/opencode/.env}"
-[ -f "$ENV_FILE" ] && source <(grep -E '^(TG_TOKEN|TG_CHAT_ID)=' "$ENV_FILE")
-TOKEN="${TG_TOKEN:-}"
-CHAT_ID="${TG_CHAT_ID:-}"
-MSG="${*:-Done}"
-if [ -z "$TOKEN" ] || [ -z "$CHAT_ID" ]; then
-    echo "Error: TG_TOKEN and TG_CHAT_ID must be set" >&2
-    exit 1
-fi
-if ! curl -s --data-urlencode "text=$MSG" \
-  "https://api.telegram.org/bot$TOKEN/sendMessage?chat_id=$CHAT_ID" >/dev/null; then
-    echo "Error sending message to Telegram" >&2
-    exit 1
-fi
+#!/usr/bin/env python3
+"""Send a one-off notification to Telegram."""
+import os, sys
+import requests
+
+ENV_FILE = os.environ.get("TG_RELAY_ENV_FILE") or os.path.expanduser("~/.config/opencode/.env")
+if os.path.exists(ENV_FILE):
+    with open(ENV_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k, v)
+
+TOKEN = os.environ.get("TG_TOKEN") or ""
+CHAT_ID = os.environ.get("TG_CHAT_ID") or ""
+MSG = " ".join(sys.argv[1:]) or "Done"
+
+if not TOKEN or not CHAT_ID:
+    print("Error: TG_TOKEN and TG_CHAT_ID must be set", file=sys.stderr)
+    sys.exit(1)
+
+resp = requests.post(
+    f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+    json={"chat_id": CHAT_ID, "text": MSG},
+)
+if not resp.ok:
+    print(f"Error sending message to Telegram: {resp.json().get('description', 'unknown')}", file=sys.stderr)
+    sys.exit(1)

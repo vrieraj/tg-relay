@@ -2,6 +2,9 @@ requests>=2.31.0
 kokoro>=0.9.4
 soundfile>=0.13.1
 numpy>=2.4.0
-# TTS local (Kokoro) requiere además:
-#   torch (CPU): pip install torch --index-url https://download.pytorch.org/whl/cpu
-#   espeak-ng: sudo pacman -S espeak-ng  (Arch) / sudo apt install espeak-ng (Debian)
+# System dependencies (not pip):
+#   inotify-tools:  sudo pacman -S inotify-tools  (Arch)
+#                   sudo apt install inotify-tools  (Debian)
+#   espeak-ng:      sudo pacman -S espeak-ng  (Arch)
+#                   sudo apt install espeak-ng  (Debian)
+#   torch (CPU):    pip install torch --index-url https://download.pytorch.org/whl/cpu
