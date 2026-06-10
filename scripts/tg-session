@@ -47,11 +47,14 @@ def close_session(name):
     print(f"✅ Sesión '{name}' cerrada")
     remaining = [d for d in os.listdir(BASE) if os.path.isdir(os.path.join(BASE, d))] if os.path.isdir(BASE) else []
     if not remaining:
-        print("No quedan sesiones activas. ¿Parar tg-serve? (s/n)")
-        if input("> ").strip().lower().startswith("s"):
-            tg_serve = shutil.which("tg-serve")
-            if tg_serve:
-                subprocess.run([tg_serve, "stop"])
+        if sys.stdin.isatty():
+            print("No quedan sesiones activas. ¿Parar tg-serve? (s/n)")
+            if input("> ").strip().lower().startswith("s"):
+                tg_serve = shutil.which("tg-serve")
+                if tg_serve:
+                    subprocess.run([tg_serve, "stop"])
+        else:
+            print("No quedan sesiones activas. Ejecuta 'tg-serve stop' si es necesario.")
 
 def create_session(name):
     path = os.path.join(BASE, name)
