@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Ask the user a question via Telegram and wait for a yes/no answer.
+Usage: tg-ask [session] "Question text"
+Returns 0 if user says yes, 1 if no, 2 if timeout/error."""
+import os, sys, time, uuid
+
+BASE = os.environ.get("TG_RELAY_SESSIONS") or os.path.expanduser("~/Proyectos/tg-relay/sessions")
+CURRENT_FILE = "/tmp/tg-current-session"
+ENV_FILE = os.environ.get("TG_RELAY_ENV_FILE") or os.path.expanduser("~/.config/opencode/.env")
+TIMEOUT = int(os.environ.get("TG_ASK_TIMEOUT", "300"))
+
+# Read .env for tokens
+cfg = {}
+if os.path.exists(ENV_FILE):
+    with open(ENV_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                cfg[k] = v
+
+TOKEN = os.environ.get("TG_TOKEN") or cfg.get("TG_TOKEN") or ""
+CHAT_ID = os.environ.get("TG_CHAT_ID") or cfg.get("TG_CHAT_ID") or ""
+
+def get_session():
+    if len(sys.argv) > 2:
+        return sys.argv[1]
+    if os.path.exists(CURRENT_FILE):
+        with open(CURRENT_FILE) as f:
+            return f.read().strip()
+    return ""
+
+def get_question():
+    if len(sys.argv) > 2:
+        return " ".join(sys.argv[2:])
+    return " ".join(sys.argv[1:])
+
+session = get_session()
+question = get_question()
+if not session:
+    print("No session specified", file=sys.stderr)
+    sys.exit(2)
+if not question:
+    print("No question specified", file=sys.stderr)
+    sys.exit(2)
+
+import requests
+
+# Write question to outbox
+out_id = str(uuid.uuid4())[:8]
+out_file = os.path.join(BASE, session, "outbox", f"{out_id}.txt")
+os.makedirs(os.path.dirname(out_file), exist_ok=True)
+with open(out_file, "w") as f:
+    f.write(f"❓ {question}\n\nResponde 'si' para confirmar o 'no' para cancelar.")
+
+# Wait for response via inotify (one-shot)
+inbox = os.path.join(BASE, session, "inbox")
+os.makedirs(inbox, exist_ok=True)
+
+import subprocess
+deadline = time.time() + TIMEOUT
+
+while time.time() < deadline:
+    remaining = int(deadline - time.time())
+    proc = subprocess.run(
+        ["inotifywait", "-q", "-e", "create", "--format", "%f", "--timeout", str(remaining), inbox],
+        capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        # timeout or error
+        with open(out_file, "w") as f:
+            f.write("⏱️ Tiempo de espera agotado para la pregunta.")
+        sys.exit(2)
+
+    # Read all pending messages
+    answer = ""
+    for fname in sorted(os.listdir(inbox)):
+        if not fname.endswith(".txt"):
+            continue
+        fpath = os.path.join(inbox, fname)
+        with open(fpath) as f:
+            content = f.read().strip()
+        os.remove(fpath)
+        answer = content.lower()
+
+    if "si" in answer:
+        with open(out_file, "w") as f:
+            f.write("✅ Autorizado.")
+        sys.exit(0)
+    elif "no" in answer:
+        with open(out_file, "w") as f:
+            f.write("❌ Denegado.")
+        sys.exit(1)
+    # else: unrelated message, keep waiting
