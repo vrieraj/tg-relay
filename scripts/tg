@@ -4,16 +4,17 @@ import os, sys
 import requests
 
 ENV_FILE = os.environ.get("TG_RELAY_ENV_FILE") or os.path.expanduser("~/.config/opencode/.env")
+cfg = {}
 if os.path.exists(ENV_FILE):
     with open(ENV_FILE) as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
-                os.environ.setdefault(k, v)
+                cfg[k] = v
 
-TOKEN = os.environ.get("TG_TOKEN") or ""
-CHAT_ID = os.environ.get("TG_CHAT_ID") or ""
+TOKEN = os.environ.get("TG_TOKEN") or cfg.get("TG_TOKEN") or ""
+CHAT_ID = os.environ.get("TG_CHAT_ID") or cfg.get("TG_CHAT_ID") or ""
 MSG = " ".join(sys.argv[1:]) or "Done"
 
 if not TOKEN or not CHAT_ID:
