@@ -4,64 +4,35 @@ Bidirectional relay between Telegram and [opencode](https://opencode.ai) AI codi
 
 ## Features
 
-- **📱 Remote control** — receive Telegram messages in opencode's inbox, send replies back
+- **📱 Remote control** — receive Telegram messages in opencode, send replies back
 - **🎤 Voice transcription** — voice messages → text via Groq Whisper (`whisper-large-v3-turbo`)
 - **🔊 Text-to-Speech** — replies as audio via local Kokoro (82M params, CPU, Spanish + 9 languages)
 - **📎 File attachments** — documents and photos stored per session
 - **🔄 Multi-session** — switch between sessions from Telegram (`usar nombre`)
 - **🔔 Notifications** — send opencode notifications to Telegram via `tg` CLI
+- **🔧 MCP server** — deterministic tools via MCP protocol, no prompt-based instructions
 
 ## Architecture
 
 ```
 Telegram API ◄──────────► tg-bot (daemon)
                                │
-                    escribe/lee en
-                               ▼
-              sessions/<nombre>/
-                 ├── inbox/       ← mensajes desde Telegram
-                 ├── outbox/      ← respuestas desde opencode
-                 ├── files/       ← archivos adjuntos
-                 ├── .new         ← señal de mensaje nuevo
-                 └── !estado.txt  ← estado de opencode
-                        │
-              ┌─────────┴─────────┐
-              ▼                   ▼
-         tg-wait             tg-monitor
-        (one-shot,         (daemon persistente,
-         inotify)           inotify -m)
-              │                   │
-              └────────┬──────────┘
-                       ▼
-                  opencode (TUI)
+                    inbox/ / outbox/
+                               │
+                         MCP Server ▲
+                               │
+                          opencode
 ```
 
-Only `tg-bot` talks to Telegram API. opencode reads/writes via simple file-based IPC.
+- **tg-bot** — the ONLY component that talks to Telegram API. Writes incoming messages to `inbox/`, reads replies from `outbox/`.
+- **MCP Server** — deterministic bridge. opencode calls MCP tools (never forgets them). Uses `inotify` for message detection — zero polling.
+- **opencode** — calls `telegram_activate`, `telegram_wait_message`, `telegram_reply`, `telegram_ask`, etc.
 
-## How it works — end-to-end example
+### Why MCP instead of prompts?
 
-```
-You (Telegram)          tg-bot (daemon)          opencode (TUI)
-     │                       │                       │
-     │  "refactor auth.py"   │                       │
-     │──────────────────────▶│                       │
-     │                       │  escribe inbox/       │
-     │                       │──────────────────────▶│  tg-wait detecta
-     │                       │                       │  tg-read procesa
-     │                       │                       │  ...trabaja...
-     │                       │                       │
-     │                       │  lee outbox/          │  escribe outbox/
-     │    "✅ Hecho, PR #42" │◄──────────────────────│
-     │◄──────────────────────│                       │
-```
+The old version used 125 lines of natural language instructions in `AGENTS.md` for opencode to follow. opencode would forget steps, mismanage state, or miss messages.
 
-1. **Llega un mensaje** — `tg-bot` recibe el update de Telegram, escribe `inbox/<id>.txt` con el texto, y crea `.new` como señal.
-2. **opencode lo detecta** — `tg-wait` (inotify) o `tg-read` ve el archivo nuevo.
-3. **opencode procesa** — lee el mensaje con `tg-read` (que lo borra del inbox), ejecuta la tarea, y escribe la respuesta en `outbox/<id>.txt`.
-4. **tg-bot responde** — el hilo responder del bot escanea `outbox/` cada 3s, detecta el archivo, lo lee, lo envía a Telegram y lo elimina.
-5. **TTS opcional** — si la respuesta empieza con `!tts `, tg-bot genera audio con Kokoro y lo envía como nota de voz.
-
-Todo es comunicación vía archivos — no hay sockets, no hay colas, no hay estado compartido en memoria. Cada componente es independiente y puede reiniciarse sin pérdida.
+The MCP server provides **concrete, always-available tools**. opencode doesn't need to remember HOW the relay works — it just calls tools that encapsulate all the logic.
 
 ## Quick Start
 
@@ -70,7 +41,7 @@ Todo es comunicación vía archivos — no hay sockets, no hay colas, no hay est
 - Linux (tested on Arch/Manjaro)
 - Python 3.11+
 - [opencode](https://opencode.ai) installed
-- `inotify-tools` (system package: `sudo pacman -S inotify-tools` on Arch, `sudo apt install inotify-tools` on Debian)
+- `inotify-tools` (`sudo pacman -S inotify-tools` / `sudo apt install inotify-tools`)
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
 - Your Telegram Chat ID
 
@@ -92,22 +63,47 @@ TG_CHAT_ID=your_chat_id
 GROQ_API_KEY=your_groq_api_key    # for voice transcription
 ```
 
+Add the MCP server to `~/.config/opencode/opencode.jsonc`:
+
+```jsonc
+"mcp": {
+  "telegram": {
+    "type": "local",
+    "command": ["/path/to/tg-relay/.venv/bin/python3", "/path/to/tg-relay/mcp_server.py"],
+    "enabled": true,
+    "environment": {
+      "TG_RELAY_SESSIONS": "/path/to/tg-relay/sessions",
+      "TG_TOKEN": "${env:TG_TOKEN}",
+      "TG_CHAT_ID": "${env:TG_CHAT_ID}",
+      "GROQ_API_KEY": "${env:GROQ_API_KEY}"
+    }
+  }
+}
+```
+
 ### Use
 
 ```bash
-# Create session
-tg-session create mysession
+# Create a session
+tg-session create my-session
 
-# Start server
-tg-serve start mysession
+# Restart opencode to load the MCP server
+```
 
-# Notify
-tg "✅ Modo remoto activado. Sesión: mysession"
+Then in opencode:
 
-# In opencode, wait for messages (one-shot)
-tg-wait mysession
-# ...process...
-tg-read mysession
+```
+"Activate Telegram relay on session my-session"
+→ opencode calls telegram_activate("my-session")
+→ tg-bot starts, Telegram receives "🔁 Relay activado"
+
+"Wait for Telegram messages"
+→ opencode calls telegram_wait_message() in a loop
+→ blocks via inotify (0% CPU)
+→ when a message arrives, returns the text
+→ opencode processes the task
+→ opencode calls telegram_reply("Done!")
+→ reply appears in Telegram
 ```
 
 ### From Telegram
@@ -117,44 +113,67 @@ tg-read mysession
 - Switch session: `usar nombre-sesion`
 - Close: `cuelgo el teléfono`
 
-## Commands
+## MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `telegram_activate(session?)` | Start tg-bot daemon. If no session given, uses last active one. |
+| `telegram_deactivate()` | Stop tg-bot. No messages will be received or sent. |
+| `telegram_wait_message(timeout=300)` | Block via inotify until a message arrives. Returns text or TIMEOUT. |
+| `telegram_reply(text, tts=false)` | Queue a reply. tg-bot picks it up and delivers it. |
+| `telegram_ask(question, timeout=300)` | Ask yes/no question via Telegram, wait for answer. Returns YES/NO/TIMEOUT. |
+| `telegram_list_files()` | List files received in the current session. |
+| `telegram_read_file(filename)` | Get local filesystem path of a received file. |
+| `telegram_session_status()` | Show session state: bot status, pending messages, files. |
+
+### Tool lifecycle
+
+```
+telegram_activate("session")    ← starts tg-bot
+       │
+telegram_wait_message()          ← blocks via inotify, returns message
+       │
+telegram_reply("Done!")          ← queues reply
+       │
+telegram_ask("Confirm?")         ← yes/no, also via inotify
+       │
+telegram_deactivate()            ← stops tg-bot
+```
+
+## CLI Commands
 
 | Command | Description |
 |---------|-------------|
 | `tg <text>` | Send notification to Telegram |
 | `tg-read [session]` | Read pending inbox messages |
 | `tg-wait [session]` | Block until new message arrives (inotify, one-shot) |
-| `tg-monitor [session]` | Daemon persistente (inotify) — escribe `/tmp/tg-new-msg` al llegar mensaje |
 | `tg-session create <name>` | Create a new session |
 | `tg-session list` | List all sessions |
 | `tg-session close <name>` | Close a session |
-| `tg-serve start <name>` | Start session server (opencode + bot + monitor) |
-| `tg-serve stop` | Stop all services |
+
+These CLI tools are still available for scripting but are not needed when using the MCP server — opencode calls the MCP tools directly.
 
 ## TTS (Text-to-Speech)
 
-For audio replies, start the outbox message with `!tts `:
+For audio replies via MCP:
 
-```bash
-echo "!tts Hola, esto es un mensaje de voz" > outbox/uuid.txt
+```
+telegram_reply("Hola, esto es un mensaje de voz", tts=true)
 ```
 
 Uses Kokoro with Spanish voice `ef_dora` at 0.85x speed.
-
-## opencode Skill
-
-This repo includes an opencode skill. Place in `~/.config/opencode/skills/tg-relay/SKILL.md` or reference via `skills.urls` in opencode.json.
 
 ## Project Structure
 
 ```
 tg-relay/
-├── scripts/              # CLI tools (tg, tg-bot, tg-read, etc.)
-├── skill/SKILL.md        # opencode skill definition
-├── opencode-config/      # AGENTS.md protocol + instructions
-├── .env.example          # Environment variables template
-├── requirements.txt      # Python dependencies
-├── install.sh            # Automated install
+├── mcp_server.py          # MCP server — deterministic tools for opencode
+├── scripts/               # CLI tools (tg, tg-bot, tg-read, etc.)
+├── skill/SKILL.md         # opencode skill definition
+├── opencode-config/       # Reference documentation (not loaded by opencode)
+├── .env.example           # Environment variables template
+├── requirements.txt       # Python dependencies
+├── install.sh             # Automated install
 └── README.md
 ```
 

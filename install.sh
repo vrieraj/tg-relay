@@ -67,7 +67,6 @@ fi
 echo "==> Copying opencode skill..."
 mkdir -p "$CONFIG_DIR/skills/tg-relay"
 cp -f "$REPO_DIR/skill/SKILL.md" "$CONFIG_DIR/skills/tg-relay/SKILL.md" 2>/dev/null || true
-cp -f "$REPO_DIR/opencode-config/AGENTS.md" "$CONFIG_DIR/AGENTS.md" 2>/dev/null || true
 
 echo ""
 echo "✅ tg-relay installed!"
@@ -75,7 +74,7 @@ echo ""
 echo "Next steps:"
 echo "  1. Install inotify-tools: sudo pacman -S inotify-tools"
 echo "  2. Edit $ENV_FILE with your tokens"
-echo "  3. Create a session: tg-session create my-session"
-echo "  4. Start the server: tg-serve start my-session"
-echo "  5. tg-serve arranca tg-monitor automáticamente (daemon inotify)"
-echo "  6. Test: tg \"Hello from opencode!\""
+echo "  3. Add MCP config to $CONFIG_DIR/opencode.jsonc (see README.md)"
+echo "  4. Create a session: tg-session create my-session"
+echo "  5. Restart opencode → MCP server loads automatically"
+echo "  6. In opencode: 'Activate Telegram relay on session my-session'"

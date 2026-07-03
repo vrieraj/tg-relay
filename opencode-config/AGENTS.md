@@ -1,125 +1,67 @@
-# Protocolo Telegram ↔ opencode
+# tg-relay MCP Server — Reference
 
-## Arquitectura
+The Telegram relay is now integrated via **MCP (Model Context Protocol)**. opencode does NOT need to follow prompt-based instructions — it calls deterministic tools.
+
+## Architecture
 
 ```
-Telegram API ◄──────────► tg-bot (daemon)
-                               │
-                    escribe/lee en
-                               ▼
-    ~/Proyectos/tg-relay/sessions/<nombre>/
-        ├── inbox/       ← mensajes desde Telegram
-        ├── outbox/      ← respuestas desde opencode
-        ├── files/       ← archivos adjuntos
-        ├── .new         ← señal de mensaje nuevo (contiene msg id)
-        └── !estado.txt  ← estado de opencode (idle | ocupado: tarea)
-              ┌────┴────┐
-              │         │
-         tg-monitor   tg-read / tg-wait
-      (inotify daemon) (inotify one-shot)
-              │         │
-              ▼         ▼
-         /tmp/tg-new-msg  opencode (TUI)
+Telegram API ◄──► tg-bot (daemon) ◄──► inbox/outbox/ ◄──► MCP Server ◄──► opencode
 ```
 
-## Responsabilidades
+- `tg-bot` — talks to Telegram API, manages inbox/outbox
+- `MCP Server` — `mcp_server.py`, exposes 8 tools via stdio
+- `opencode` — calls MCP tools, never touches files directly
 
-### tg-bot (daemon)
-- **Único** que habla con Telegram API
-- **Inbound**: recibe texto/voz/archivos, escribe en `inbox/`, verifica estado
-- **Outbound**: monitoriza `outbox/` y envía respuestas a Telegram (con TTS si procede)
-- **Transcripción**: voz → texto vía Groq Whisper
-- **TTS**: respuestas a audio vía Kokoro (local)
+## Tools
 
-### opencode (TUI)
-- Nunca llama a Telegram API directamente
-- Lee `inbox/` con `tg-read`
-- Escribe respuestas en `outbox/`
-- Gestiona estado (`!estado.txt`)
-- Detecta vuelta a terminal y pregunta si cerrar sesión
+| Tool | What it does |
+|------|-------------|
+| `telegram_activate(session?)` | Starts tg-bot daemon. Auto-creates inbox/outbox/files dirs. |
+| `telegram_deactivate()` | Stops tg-bot, cleans up PID file. |
+| `telegram_wait_message(timeout=300)` | Blocks via inotify (kernel-level, 0% CPU) until message arrives. Drains all pending messages from inbox. Returns text or "TIMEOUT". |
+| `telegram_reply(text, tts=false)` | Writes reply to outbox. tg-bot's responder thread picks it up within 3 seconds. |
+| `telegram_ask(question, timeout=300)` | Sends question to Telegram, waits for yes/no via inotify. Returns "YES", "NO", or "TIMEOUT". |
+| `telegram_list_files()` | Lists files in current session with sizes. |
+| `telegram_read_file(filename)` | Returns absolute path to a received file. opencode reads it directly. |
+| `telegram_session_status()` | Shows session name, bot state (running/stopped), pending messages, queued replies, file count. |
 
-### tg-monitor (daemon opcional)
-- **Inotify persistente**: monitoriza `inbox/` con `inotifywait -m`
-- **Notificación**: escribe la sesión en `/tmp/tg-new-msg` cuando llega un mensaje
-- **Alternativa ligera**: permite a opencode vigilar un solo archivo en vez de llamar a `tg-wait`
+## Lifecycle
 
-## Flujo de mensaje entrante (Telegram → opencode)
+1. User tells opencode: "Activate Telegram on session X"
+2. opencode calls `telegram_activate("X")` → tg-bot starts
+3. opencode calls `telegram_wait_message()` in a loop → blocks via inotify
+4. Message arrives → tool returns text → opencode processes
+5. opencode calls `telegram_reply(text)` → reply appears in Telegram
+6. If confirmation needed: `telegram_ask("¿Ejecuto migración?")`
 
-1. Usuario envía texto/voz/archivo a bot de Telegram
-2. `tg-bot` recibe el update:
-   - Si es **voz**: descarga, transcribe con Groq, escribe transcripción en `inbox/`
-   - Si es **texto**: escribe directamente en `inbox/<uuid>.txt`
-   - Si es **archivo** (document, photo): descarga a `files/`, escribe nota en `inbox/`
-3. `tg-bot` lee `!estado.txt`:
-   - **idle** (o no existe): escribe `.new` con el msg id → señal para opencode
-   - **ocupado: X**: responde a Telegram "⏳ Estoy ocupado: X. Tu mensaje queda en cola."
-4. **Detección**: opencode bloquea con `tg-wait` (inotify) hasta que aparece un archivo en `inbox/`
-   - Alternativa: opencode vigila `/tmp/tg-new-msg` (escrito por tg-monitor)
-5. opencode ejecuta `tg-read` para leer y procesar mensajes pendientes
-6. **Bucle**: al terminar, opencode vuelve al paso 4
+## Internals
 
-## Flujo de mensaje saliente (opencode → Telegram)
+- Session state: `/tmp/tg-current-session`
+- Bot PID: `/tmp/tg-bot.pid`
+- Sessions dir: `~/Proyectos/tg-relay/sessions/<name>/`
+- Bot auto-starts/cleanup on MCP server start/stop
+- Health check: if tg-bot crashes on start (< 0.5s), error returned
+- Inotify required: checks at startup, tools return error if missing
 
-1. opencode procesa mensaje y decide respuesta
-2. opencode escribe respuesta en `outbox/<uuid>.txt`
-3. `tg-bot` (responder thread, cada 3s) detecta el archivo, lo lee y lo borra
-4. `tg-bot` envía el texto a Telegram (con TTS si el texto empieza por `!tts `)
+## Configuration
 
-## Gestión de estado
+In `~/.config/opencode/opencode.jsonc`:
 
-- opencode **siempre** actualiza `!estado.txt` automáticamente:
-  - Al iniciar tarea → `echo "ocupado: descripción breve" > !estado.txt`
-  - Al terminar tarea → `rm -f !estado.txt` (pasa a idle)
-- **No se cambia estado desde Telegram** — opencode lo gestiona solo
-- `tg-bot` solo notifica `.new` si está idle
-- opencode al volver a idle debe revisar `inbox/` SIEMPRE
-- **Nunca uses sleep/polling** para esperar mensajes — usa `tg-wait` (inotify) o `/tmp/tg-new-msg`
-
-## Ciclo de vida de sesión
-
-### Crear
-```bash
-tg-session create <nombre>
-tg-serve start <nombre>
-tg "✅ Modo remoto activado. Sesión: <nombre>"
+```jsonc
+"telegram": {
+  "type": "local",
+  "command": ["/path/to/tg-relay/.venv/bin/python3", "/path/to/tg-relay/mcp_server.py"],
+  "enabled": true,
+  "environment": {
+    "TG_RELAY_SESSIONS": "/home/vencejo/Proyectos/tg-relay/sessions",
+    "TG_TOKEN": "${env:TG_TOKEN}",
+    "TG_CHAT_ID": "${env:TG_CHAT_ID}",
+    "GROQ_API_KEY": "${env:GROQ_API_KEY}"
+  }
+}
 ```
 
-### Usar (cambiar de sesión desde Telegram)
-- Enviar: `usar <nombre>` o `cambiar a <nombre>`
-- `listar sesiones` — lista todas con detalles
-- `crear sesion <nombre>` — crea y activa una nueva
-- `cerrar sesion [nombre]` — cierra (archivos guardados automáticamente)
-- `tg-wait` / `tg-read` sin argumentos usan la sesión activa (`/tmp/tg-current-session`)
-
-### Cerrar
-- **Desde Telegram**: "cuelgo el teléfono"
-- **Desde TUI**: Preguntar "¿Cerramos sesión Telegram? (s/n)"
-  - Si sí: `tg-session close <nombre>` → pregunta archivos → limpia
-  - Si no: continúa normalmente
-- **Por comando**: `tg-session close <nombre>`
-  - Pregunta qué hacer con archivos (guardar/borrar)
-  - Si guardar: mueve `files/` a `~/Descargas/tg-<nombre>-<fecha>`
-  - Si borrar: elimina `files/`
-  - Elimina la carpeta de sesión
-  - Si no quedan sesiones: pregunta si parar tg-serve
-
-## Inotify watcher
-
-- `tg-monitor` es un daemon persistente que monitoriza `inbox/` via inotify
-- Arrancar en background: `tg-serve start <sesion>` lo lanza automáticamente
-- Requiere `inotify-tools` instalado en el sistema
-- Cuando tg-bot crea un archivo en `inbox/`, el monitor escribe `/tmp/tg-new-msg` con el nombre de la sesión
-- **Alternativa a tg-wait**: opencode puede vigilar `/tmp/tg-new-msg` con inotify en vez de llamar a tg-wait
-
-## Notas técnicas
-
-- **tg-bot** usa `/tmp/tg-last-update` para offset de Telegram API
-- **tg-bot** persiste la sesión activa en `/tmp/tg-current-session`
-- **tg-bot** corre con Python del venv: `tg-relay/.venv/bin/python3`
-- **tg-monitor** y **tg-wait** dependen de `inotify-tools` (sistema)
-- El `.new` contiene el msg id del último mensaje (se sobrescribe)
-- Los mensajes en `inbox/` usan formato `<uuid>.txt` con el texto plano
-- Las respuestas en `outbox/` usan formato `<uuid>.txt` con el texto a enviar
-- Si se quiere respuesta con audio, el texto en outbox debe empezar con `!tts `
-- Los mensajes editados en Telegram se reescriben en `inbox/` con prefijo `✏️ *mensaje editado*:`
-- **TTS local** con Kokoro (82M params, CPU, español + 9 idiomas)
+Required env vars in `~/.config/opencode/.env`:
+- `TG_TOKEN` — Telegram bot token from @BotFather
+- `TG_CHAT_ID` — your Telegram chat ID
+- `GROQ_API_KEY` — (optional) for voice transcription
