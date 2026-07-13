@@ -16,7 +16,7 @@ tg-serve stop 2>/dev/null || true
 
 # Remove scripts
 echo "==> Eliminando scripts de $INSTALL_DIR..."
-for script in tg tg-bot tg-monitor tg-read tg-serve tg-session tg-wait; do
+for script in tg tg-ask tg-bot tg-monitor tg-read tg-serve tg-session tg-wait; do
     if [ -f "$INSTALL_DIR/$script" ]; then
         rm -f "$INSTALL_DIR/$script"
         echo "    $INSTALL_DIR/$script"

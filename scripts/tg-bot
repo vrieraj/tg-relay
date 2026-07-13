@@ -1,31 +1,17 @@
 #!/usr/bin/env python3
 """Telegram relay daemon: multi-session, voice/text, Kokoro TTS (local)."""
-import json, os, re, signal, sys, threading, time, uuid
+import json, os, re, shutil, signal, sys, threading, time, uuid
 from datetime import datetime
 import requests
+from tg_shared import get_token, get_chat_id, get_groq_key, get_base_dir, get_current_session, drain_inbox
 
-ENV_FILE = os.environ.get("TG_RELAY_ENV_FILE") or os.path.expanduser("~/.config/opencode/.env")
-cfg = {}
-if os.path.exists(ENV_FILE):
-    with open(ENV_FILE) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                cfg[k] = v
-
-TOKEN = os.environ.get("TG_TOKEN") or cfg.get("TG_TOKEN") or ""
-CHAT_ID = os.environ.get("TG_CHAT_ID") or cfg.get("TG_CHAT_ID") or ""
-GROQ_KEY = os.environ.get("GROQ_API_KEY") or cfg.get("GROQ_API_KEY") or ""
-BASE = os.environ.get("TG_RELAY_SESSIONS") or os.path.expanduser("~/Proyectos/tg-relay/sessions")
+TOKEN = get_token()
+CHAT_ID = get_chat_id()
+GROQ_KEY = get_groq_key()
+BASE = get_base_dir()
 STATE_FILE = "/tmp/tg-last-update"
 CURRENT_FILE = "/tmp/tg-current-session"
-CURRENT = ""
-if os.path.exists(CURRENT_FILE):
-    with open(CURRENT_FILE) as f:
-        CURRENT = f.read().strip()
-if not CURRENT:
-    CURRENT = os.environ.get("TG_CURRENT_SESSION") or ""
+CURRENT = get_current_session()
 
 if not TOKEN or not CHAT_ID:
     print("ERROR: TG_TOKEN and TG_CHAT_ID are required", file=sys.stderr)
@@ -40,6 +26,8 @@ def send_text(text):
     data = resp.json()
     if not data.get("ok"):
         print(f"[send_text] Telegram API error: {data.get('description', 'unknown')}", file=sys.stderr)
+        return False
+    return True
 
 def send_audio(file_path):
     with open(file_path, "rb") as f:
@@ -48,6 +36,8 @@ def send_audio(file_path):
     data = resp.json()
     if not data.get("ok"):
         print(f"[send_audio] Telegram API error: {data.get('description', 'unknown')}", file=sys.stderr)
+        return False
+    return True
 
 def transcribe_groq(file_path):
     with open(file_path, "rb") as f:
@@ -146,7 +136,6 @@ def close_session_from_telegram(name):
         for f in os.listdir(files_dir):
             shutil.move(os.path.join(files_dir, f), os.path.join(dest, f))
         saved = [f"📁 {len(os.listdir(dest))} archivos guardados en {dest}"]
-    import shutil
     shutil.rmtree(path)
     global CURRENT
     if CURRENT == name:
@@ -198,6 +187,18 @@ send_text(f"🔁 Relay activado | Sesión: {CURRENT or '(ninguna)'}")
 send_text("Sesiones:\n" + format_sessions() if list_sessions() else "Sin sesiones activas")
 
 def responder():
+    stale = 0
+    for ses in list_sessions():
+        out_dir = os.path.join(BASE, ses, "outbox")
+        if not os.path.isdir(out_dir):
+            continue
+        for fname in sorted(os.listdir(out_dir)):
+            if fname.endswith(".processing"):
+                os.remove(os.path.join(out_dir, fname))
+                stale += 1
+    if stale:
+        print(f"[responder] Cleaned {stale} orphan .processing file(s)", file=sys.stderr)
+
     while True:
         try:
             for ses in list_sessions():
@@ -220,8 +221,10 @@ def responder():
                             if reply.startswith("!tts "):
                                 audio_path = tts_kokoro(reply[5:])
                                 if audio_path:
-                                    send_audio(audio_path)
-                                    os.remove(audio_path)
+                                    if send_audio(audio_path):
+                                        os.remove(audio_path)
+                                else:
+                                    send_text(reply[5:])
                             else:
                                 send_text(reply)
                     finally:

@@ -105,8 +105,8 @@ def _start_bot(session: str) -> None:
     bot_process = subprocess.Popen(
         [VENV_PYTHON, "-u", TG_BOT_PATH],
         env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         start_new_session=True,
     )
 
@@ -118,9 +118,11 @@ def _start_bot(session: str) -> None:
     time.sleep(0.5)
 
     if bot_process.poll() is not None:
+        _, stderr = bot_process.communicate()
         _stop_bot()
+        err_msg = stderr.decode().strip() if stderr else f"exit code {bot_process.returncode}"
         raise RuntimeError(
-            f"tg-bot failed to start (exit code {bot_process.returncode}). "
+            f"tg-bot failed to start: {err_msg}. "
             "Check TG_TOKEN and TG_CHAT_ID in ~/.config/opencode/.env"
         )
 
@@ -434,6 +436,7 @@ async def telegram_read_file(filename: str) -> str:
     if not session:
         return "ERROR: No active session. Use telegram_activate first."
 
+    filename = os.path.basename(filename)
     fpath = os.path.join(BASE, session, "files", filename)
     if not os.path.isfile(fpath):
         return f"ERROR: File '{filename}' not found in session '{session}'"
